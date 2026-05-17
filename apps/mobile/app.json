@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Live Translate Platform",
+    "slug": "live-translate-platform",
+    "scheme": "livetranslate",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.livetranslate.platform",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Live Translate Platform uses the microphone to transcribe and translate speech in real time."
+      }
+    },
+    "android": {
+      "package": "com.livetranslate.platform",
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "BLUETOOTH_CONNECT"
+      ]
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
