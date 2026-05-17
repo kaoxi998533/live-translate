@@ -38,6 +38,17 @@ export type RealtimeClientSecret = {
   model: string;
 };
 
+export type PaymentOrder = {
+  id: string;
+  planId: "premium";
+  provider: "wechat_pay" | "stripe" | "apple_iap" | "google_play" | "alipay";
+  providerOrderId: string;
+  amountMinor: number;
+  currency: string;
+  status: "pending" | "paid" | "failed" | "canceled";
+  createdAt: string;
+};
+
 export async function register(email: string, password: string) {
   return request<AuthResponse>("/v1/auth/register", {
     method: "POST",
@@ -75,12 +86,13 @@ export async function createTranslationSession(
 export async function createRealtimeClientSecret(
   token: string,
   partyALanguage: string,
-  partyBLanguage: string
+  partyBLanguage: string,
+  listenMode: "auto" | "hold"
 ) {
   return request<RealtimeClientSecret>("/v1/realtime/client-secret", {
     method: "POST",
     token,
-    body: { partyALanguage, partyBLanguage }
+    body: { partyALanguage, partyBLanguage, listenMode }
   });
 }
 
@@ -94,6 +106,21 @@ export async function addUsage(token: string, sessionId: string, seconds: number
 
 export async function endTranslationSession(token: string, sessionId: string) {
   return request(`/v1/translation/sessions/${sessionId}/end`, {
+    method: "POST",
+    token
+  });
+}
+
+export async function createPaymentOrder(token: string, provider = "wechat_pay") {
+  return request<PaymentOrder>("/v1/billing/orders", {
+    method: "POST",
+    token,
+    body: { planId: "premium", provider }
+  });
+}
+
+export async function markPaymentOrderPaidForDev(token: string, orderId: string) {
+  return request<ApiUser>(`/v1/dev/billing/orders/${orderId}/mark-paid`, {
     method: "POST",
     token
   });
@@ -121,7 +148,7 @@ async function request<T>(
     const message =
       typeof payload.error === "string"
         ? payload.error
-        : `Request failed with ${response.status}`;
+        : `请求失败：${response.status}`;
     throw new Error(message);
   }
 

@@ -42,21 +42,21 @@ type tokenPayload struct {
 func HandleRegister(w http.ResponseWriter, r *http.Request) {
 	var request credentialsRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, "请求内容格式不正确")
 		return
 	}
 	if !validCredentials(request.Email, request.Password) {
-		writeError(w, http.StatusBadRequest, "valid email and password are required")
+		writeError(w, http.StatusBadRequest, "请输入有效邮箱和至少 8 位密码")
 		return
 	}
 
 	user, err := store.Default.Register(strings.ToLower(request.Email), request.Password, request.DisplayName)
 	if err == store.ErrEmailTaken {
-		writeError(w, http.StatusConflict, "email already registered")
+		writeError(w, http.StatusConflict, store.ErrEmailTaken.Error())
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not register user")
+		writeError(w, http.StatusInternalServerError, "注册失败，请稍后再试")
 		return
 	}
 
@@ -66,13 +66,13 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) {
 func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var request credentialsRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, "请求内容格式不正确")
 		return
 	}
 
 	user, err := store.Default.Authenticate(strings.ToLower(request.Email), request.Password)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid email or password")
+		writeError(w, http.StatusUnauthorized, store.ErrInvalidCredential.Error())
 		return
 	}
 
@@ -83,19 +83,19 @@ func RequireUser(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token == "" {
-			writeError(w, http.StatusUnauthorized, "missing bearer token")
+			writeError(w, http.StatusUnauthorized, "请先登录")
 			return
 		}
 
 		payload, ok := verifyToken(token)
 		if !ok || payload.Exp < time.Now().Unix() {
-			writeError(w, http.StatusUnauthorized, "invalid bearer token")
+			writeError(w, http.StatusUnauthorized, "登录状态已失效，请重新登录")
 			return
 		}
 
 		user, exists := store.Default.User(payload.UserID)
 		if !exists {
-			writeError(w, http.StatusUnauthorized, "user not found")
+			writeError(w, http.StatusUnauthorized, "账号不存在")
 			return
 		}
 

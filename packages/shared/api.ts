@@ -25,10 +25,22 @@ export type CreateTranslationSessionRequest = {
 export type RealtimeClientSecretRequest = {
   partyALanguage: string;
   partyBLanguage: string;
+  listenMode: "auto" | "hold";
 };
 
 export type CreateTranslationSessionResponse = {
   id: string;
   status: "created" | "active" | "ended";
   startedAt: string;
+};
+
+export type PaymentOrderResponse = {
+  id: string;
+  planId: "premium";
+  provider: "wechat_pay" | "stripe" | "apple_iap" | "google_play" | "alipay";
+  providerOrderId: string;
+  amountMinor: number;
+  currency: string;
+  status: "pending" | "paid" | "failed" | "canceled";
+  createdAt: string;
 };

@@ -29,17 +29,25 @@ const quickLanguages = ["en", "zh", "ja", "ko", "es", "fr"];
 
 type DataChannel = {
   close: () => void;
+  send: (data: string) => void;
   addEventListener: (type: string, listener: (event: { data?: unknown }) => void) => void;
+};
+
+type AudioTrack = {
+  enabled: boolean;
+  stop: () => void;
 };
 
 export default function TranslateScreen() {
   const { token } = useAuth();
   const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [original, setOriginal] = useState("Start a session and place the phone between two speakers.");
-  const [translation, setTranslation] = useState("The app will translate each speaker into the other speaker's language.");
+  const [original, setOriginal] = useState("开始会话后，把手机放在两位说话者中间。");
+  const [translation, setTranslation] = useState("应用会把每个人的话翻译成对方的语言。");
   const [partyALanguage, setPartyALanguage] = useState("zh");
   const [partyBLanguage, setPartyBLanguage] = useState("en");
+  const [listenMode, setListenMode] = useState<"auto" | "hold">("auto");
+  const [holding, setHolding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -47,6 +55,7 @@ export default function TranslateScreen() {
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const dataChannelRef = useRef<DataChannel | null>(null);
+  const micTrackRef = useRef<AudioTrack | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -69,7 +78,7 @@ export default function TranslateScreen() {
     try {
       setEntitlement(await getEntitlement(activeToken));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load access state");
+      setError(err instanceof Error ? err.message : "无法读取使用权限");
     }
   }
 
@@ -81,8 +90,8 @@ export default function TranslateScreen() {
 
     setBusy(true);
     setError(null);
-    setOriginal("Connecting microphone...");
-    setTranslation("Connecting to OpenAI Realtime...");
+    setOriginal("正在连接麦克风...");
+    setTranslation("正在连接实时翻译...");
 
     try {
       const apiSession = await createTranslationSession(
@@ -93,7 +102,8 @@ export default function TranslateScreen() {
       const realtimeSecret = await createRealtimeClientSecret(
         activeToken,
         partyALanguage,
-        partyBLanguage
+        partyBLanguage,
+        listenMode
       );
       const stream = await mediaDevices.getUserMedia({
         audio: true,
@@ -104,17 +114,21 @@ export default function TranslateScreen() {
       const dataChannel = peer.createDataChannel("oai-events") as unknown as DataChannel;
 
       dataChannel.addEventListener("open", () => {
-        setOriginal("Listening...");
-        setTranslation(`${languageLabel(partyALanguage)} <-> ${languageLabel(partyBLanguage)} is active.`);
+        setOriginal("正在监听...");
+        setTranslation(`${languageLabel(partyALanguage)} ↔ ${languageLabel(partyBLanguage)} 已连接。`);
       });
       dataChannel.addEventListener("message", (message) => {
         handleRealtimeEvent(String(message.data));
       });
       dataChannel.addEventListener("error", () => {
-        setError("Realtime data channel error");
+        setError("实时通道错误");
       });
 
       stream.getTracks().forEach((track) => {
+        if (listenMode === "hold") {
+          track.enabled = false;
+        }
+        micTrackRef.current = track as unknown as AudioTrack;
         peer.addTrack(track, stream);
       });
 
@@ -161,12 +175,12 @@ export default function TranslateScreen() {
             await stop();
           }
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Usage update failed");
+          setError(err instanceof Error ? err.message : "用量更新失败");
           await stop();
         }
       }, USAGE_TICK_SECONDS * 1000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start Realtime session");
+      setError(err instanceof Error ? err.message : "无法启动实时翻译");
       await stop();
     } finally {
       setBusy(false);
@@ -184,7 +198,7 @@ export default function TranslateScreen() {
       };
 
       if (event.type === "error") {
-        setError(event.error?.message ?? "OpenAI Realtime error");
+        setError(event.error?.message ?? "实时翻译错误");
         return;
       }
 
@@ -193,23 +207,23 @@ export default function TranslateScreen() {
       }
 
       if (event.type === "input_audio_buffer.speech_started") {
-        setTranslation("Listening...");
+        setTranslation("正在听...");
       }
 
       if (event.type === "input_audio_buffer.speech_stopped") {
-        setTranslation("Translating...");
+        setTranslation("正在翻译...");
       }
 
       if (event.type === "response.created") {
-        setTranslation("Translating...");
+        setTranslation("正在翻译...");
       }
 
       if (event.type === "response.output_audio_transcript.delta" && event.delta) {
         setTranslation((current) =>
-          current.startsWith("Speak") ||
-          current.startsWith("Realtime") ||
-          current === "Listening..." ||
-          current === "Translating..."
+          current.startsWith("说话") ||
+          current.startsWith("实时") ||
+          current === "正在听..." ||
+          current === "正在翻译..."
             ? event.delta ?? ""
             : current + event.delta
         );
@@ -237,6 +251,8 @@ export default function TranslateScreen() {
 
     dataChannelRef.current?.close();
     dataChannelRef.current = null;
+    micTrackRef.current = null;
+    setHolding(false);
 
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     mediaStreamRef.current = null;
@@ -252,12 +268,37 @@ export default function TranslateScreen() {
         await refreshEntitlement(activeToken);
       }
       if (activeSessionId) {
-        setOriginal("Session stopped.");
-        setTranslation("Ready for the next Realtime session.");
+        setOriginal("会话已结束。");
+        setTranslation("可以开始下一次同声翻译。");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not stop session");
+      setError(err instanceof Error ? err.message : "无法结束会话");
     }
+  }
+
+  function beginHold() {
+    if (listenMode !== "hold" || !sessionId || busy) {
+      return;
+    }
+    micTrackRef.current && (micTrackRef.current.enabled = true);
+    setHolding(true);
+    setOriginal("按住时正在收音...");
+    setTranslation("松开后翻译。");
+  }
+
+  function endHold() {
+    if (listenMode !== "hold" || !sessionId) {
+      return;
+    }
+    micTrackRef.current && (micTrackRef.current.enabled = false);
+    setHolding(false);
+    setTranslation("正在翻译...");
+    sendRealtimeEvent({ type: "input_audio_buffer.commit" });
+    sendRealtimeEvent({ type: "response.create" });
+  }
+
+  function sendRealtimeEvent(event: Record<string, unknown>) {
+    dataChannelRef.current?.send(JSON.stringify(event));
   }
 
   const remainingMinutes = Math.ceil((entitlement?.remainingSeconds ?? 0) / 60);
@@ -269,7 +310,7 @@ export default function TranslateScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>Live Translate Platform</Text>
-            <Text style={styles.title}>Translate</Text>
+            <Text style={styles.title}>同声翻译</Text>
           </View>
           <Link href="/dashboard" asChild>
             <Pressable style={styles.iconButton}>
@@ -280,49 +321,88 @@ export default function TranslateScreen() {
 
         <View style={styles.statusRow}>
           <View style={styles.statusPill}>
-            <Text style={styles.statusLabel}>Access</Text>
+            <Text style={styles.statusLabel}>权限</Text>
             <Text style={styles.statusValue}>
-              {entitlement?.canTranslate ? entitlement.plan : "Blocked"}
+              {entitlement?.canTranslate ? planLabel(entitlement.plan) : "不可用"}
             </Text>
           </View>
           <View style={styles.statusPill}>
-            <Text style={styles.statusLabel}>Remaining</Text>
-            <Text style={styles.statusValue}>{remainingMinutes} min</Text>
+            <Text style={styles.statusLabel}>剩余</Text>
+            <Text style={styles.statusValue}>{remainingMinutes} 分钟</Text>
           </View>
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Conversation</Text>
-          <Text style={styles.controlLabel}>Person A speaks</Text>
+          <Text style={styles.panelTitle}>对话设置</Text>
+          <Text style={styles.controlLabel}>收音方式</Text>
+          <View style={styles.modeSwitch}>
+            <Pressable
+              disabled={isActive}
+              onPress={() => setListenMode("auto")}
+              style={[
+                styles.modeOption,
+                listenMode === "auto" && styles.modeOptionActive,
+                isActive && styles.segmentDisabled
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modeOptionText,
+                  listenMode === "auto" && styles.modeOptionTextActive
+                ]}
+              >
+                自动监听
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={isActive}
+              onPress={() => setListenMode("hold")}
+              style={[
+                styles.modeOption,
+                listenMode === "hold" && styles.modeOptionActive,
+                isActive && styles.segmentDisabled
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modeOptionText,
+                  listenMode === "hold" && styles.modeOptionTextActive
+                ]}
+              >
+                按住说话
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.controlLabel}>A 说的语言</Text>
           <View style={styles.segmented}>
             {targetLanguages
               .filter((item) => quickLanguages.includes(item.code))
               .map((item) => (
-              <Pressable
-                disabled={isActive}
-                key={item.code}
-                onPress={() => setPartyALanguage(item.code)}
-                style={[
-                  styles.segment,
-                  partyALanguage === item.code && styles.segmentActive,
-                  isActive && styles.segmentDisabled
-                ]}
-              >
-                <Text
+                <Pressable
+                  disabled={isActive}
+                  key={item.code}
+                  onPress={() => setPartyALanguage(item.code)}
                   style={[
-                    styles.segmentText,
-                    partyALanguage === item.code && styles.segmentTextActive
+                    styles.segment,
+                    partyALanguage === item.code && styles.segmentActive,
+                    isActive && styles.segmentDisabled
                   ]}
                 >
-                  {item.label}
-                </Text>
-              </Pressable>
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      partyALanguage === item.code && styles.segmentTextActive
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
               ))}
           </View>
 
-          <Text style={styles.controlLabel}>Person B speaks</Text>
+          <Text style={styles.controlLabel}>B 说的语言</Text>
           <View style={styles.segmented}>
             {targetLanguages
               .filter((item) => quickLanguages.includes(item.code))
@@ -350,29 +430,54 @@ export default function TranslateScreen() {
           </View>
 
           <Option
-            label="Interpreting"
-            value={`${languageLabel(partyALanguage)} <-> ${languageLabel(partyBLanguage)}`}
+            label="翻译方向"
+            value={`${languageLabel(partyALanguage)} ↔ ${languageLabel(partyBLanguage)}`}
           />
-          <Option label="Audio source" value="Microphone" />
-          <Pressable
-            disabled={busy || (!isActive && entitlement?.canTranslate === false)}
-            onPress={isActive ? stop : start}
-            style={[
-              styles.primaryButton,
-              isActive && styles.stopButton,
-              (busy || (!isActive && entitlement?.canTranslate === false)) &&
-                styles.disabledButton
-            ]}
-          >
-            <Ionicons name={isActive ? "stop" : "mic"} size={20} color="#ffffff" />
-            <Text style={styles.primaryButtonText}>
-              {busy ? "Working..." : isActive ? "Stop" : "Start translating"}
-            </Text>
-          </Pressable>
+          <Option label="音频来源" value="手机麦克风" />
+          {listenMode === "hold" && isActive ? (
+            <View style={styles.holdControls}>
+              <Pressable
+                onPressIn={beginHold}
+                onPressOut={endHold}
+                style={[styles.primaryButton, holding && styles.recordingButton]}
+              >
+                <Ionicons name="mic" size={20} color="#ffffff" />
+                <Text style={styles.primaryButtonText}>
+                  {holding ? "松开翻译" : "按住说话"}
+                </Text>
+              </Pressable>
+              <Pressable onPress={stop} style={[styles.primaryButton, styles.stopButton]}>
+                <Ionicons name="stop" size={20} color="#ffffff" />
+                <Text style={styles.primaryButtonText}>结束会话</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              disabled={busy || (!isActive && entitlement?.canTranslate === false)}
+              onPress={isActive ? stop : start}
+              style={[
+                styles.primaryButton,
+                isActive && styles.stopButton,
+                (busy || (!isActive && entitlement?.canTranslate === false)) &&
+                  styles.disabledButton
+              ]}
+            >
+              <Ionicons name={isActive ? "stop" : "mic"} size={20} color="#ffffff" />
+              <Text style={styles.primaryButtonText}>
+                {busy
+                  ? "处理中..."
+                  : isActive
+                    ? "停止自动监听"
+                    : listenMode === "hold"
+                      ? "开始按住说话"
+                      : "开始自动监听"}
+              </Text>
+            </Pressable>
+          )}
         </View>
 
-        <Transcript title="Original" text={original} />
-        <Transcript title="Translation" text={translation} />
+        <Transcript title="原文" text={original} />
+        <Transcript title="译文" text={translation} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -392,6 +497,16 @@ function Option({ label, value }: { label: string; value: string }) {
 
 function languageLabel(code: string) {
   return targetLanguages.find((language) => language.code === code)?.label ?? code;
+}
+
+function planLabel(plan?: string) {
+  if (plan === "premium") {
+    return "高级会员";
+  }
+  if (plan === "trial") {
+    return "试用中";
+  }
+  return "读取中";
 }
 
 function Transcript({ title, text }: { title: string; text: string }) {
@@ -499,6 +614,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700"
   },
+  modeSwitch: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 8
+  },
+  modeOption: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#d9e0ea",
+    borderRadius: 8,
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 10
+  },
+  modeOptionActive: {
+    borderColor: "#0f766e",
+    backgroundColor: "#e7f5f3"
+  },
+  modeOptionText: {
+    color: "#667085",
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  modeOptionTextActive: {
+    color: "#0f766e"
+  },
   segmented: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -544,6 +687,12 @@ const styles = StyleSheet.create({
   },
   stopButton: {
     backgroundColor: "#b42318"
+  },
+  recordingButton: {
+    backgroundColor: "#b45309"
+  },
+  holdControls: {
+    gap: 10
   },
   disabledButton: {
     opacity: 0.6

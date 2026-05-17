@@ -15,6 +15,7 @@ import (
 type ClientSecretRequest struct {
 	PartyALanguage string `json:"partyALanguage"`
 	PartyBLanguage string `json:"partyBLanguage"`
+	ListenMode     string `json:"listenMode"`
 }
 
 type ClientSecretResponse struct {
@@ -33,7 +34,7 @@ func HandleClientSecret(w http.ResponseWriter, r *http.Request) {
 
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		writeError(w, http.StatusServiceUnavailable, "OPENAI_API_KEY is not configured")
+		writeError(w, http.StatusServiceUnavailable, "实时翻译服务尚未配置")
 		return
 	}
 
@@ -44,6 +45,9 @@ func HandleClientSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.PartyBLanguage == "" {
 		request.PartyBLanguage = "en"
+	}
+	if request.ListenMode == "" {
+		request.ListenMode = "auto"
 	}
 
 	model := env("OPENAI_REALTIME_MODEL", "gpt-realtime")
@@ -64,14 +68,7 @@ func HandleClientSecret(w http.ResponseWriter, r *http.Request) {
 					"transcription": map[string]any{
 						"model": transcriptionModel,
 					},
-					"turn_detection": map[string]any{
-						"type":                "server_vad",
-						"threshold":           envFloat("OPENAI_REALTIME_VAD_THRESHOLD", 0.78),
-						"prefix_padding_ms":   envInt("OPENAI_REALTIME_VAD_PREFIX_PADDING_MS", 250),
-						"silence_duration_ms": envInt("OPENAI_REALTIME_VAD_SILENCE_DURATION_MS", 450),
-						"create_response":     envBool("OPENAI_REALTIME_VAD_CREATE_RESPONSE", true),
-						"interrupt_response":  envBool("OPENAI_REALTIME_VAD_INTERRUPT_RESPONSE", true),
-					},
+					"turn_detection": turnDetection(request.ListenMode),
 				},
 				"output": map[string]any{
 					"voice": env("OPENAI_REALTIME_VOICE", "marin"),
@@ -83,13 +80,13 @@ func HandleClientSecret(w http.ResponseWriter, r *http.Request) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not encode realtime request")
+		writeError(w, http.StatusInternalServerError, "无法创建实时翻译请求")
 		return
 	}
 
 	req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/realtime/client_secrets", bytes.NewReader(body))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create realtime request")
+		writeError(w, http.StatusInternalServerError, "无法创建实时翻译请求")
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -97,7 +94,7 @@ func HandleClientSecret(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "could not reach OpenAI Realtime API")
+		writeError(w, http.StatusBadGateway, "暂时无法连接实时翻译服务")
 		return
 	}
 	defer resp.Body.Close()
@@ -105,7 +102,7 @@ func HandleClientSecret(w http.ResponseWriter, r *http.Request) {
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		writeJSON(w, resp.StatusCode, map[string]string{
-			"error":  "OpenAI Realtime API rejected the client secret request",
+			"error":  "实时翻译服务拒绝了本次请求",
 			"detail": string(respBody),
 		})
 		return
@@ -116,7 +113,7 @@ func HandleClientSecret(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt int64  `json:"expires_at"`
 	}
 	if err := json.Unmarshal(respBody, &openAIResponse); err != nil {
-		writeError(w, http.StatusBadGateway, "invalid OpenAI Realtime API response")
+		writeError(w, http.StatusBadGateway, "实时翻译服务返回异常")
 		return
 	}
 
@@ -125,6 +122,20 @@ func HandleClientSecret(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: openAIResponse.ExpiresAt,
 		Model:     model,
 	})
+}
+
+func turnDetection(listenMode string) any {
+	if listenMode == "hold" {
+		return nil
+	}
+	return map[string]any{
+		"type":                "server_vad",
+		"threshold":           envFloat("OPENAI_REALTIME_VAD_THRESHOLD", 0.78),
+		"prefix_padding_ms":   envInt("OPENAI_REALTIME_VAD_PREFIX_PADDING_MS", 250),
+		"silence_duration_ms": envInt("OPENAI_REALTIME_VAD_SILENCE_DURATION_MS", 450),
+		"create_response":     envBool("OPENAI_REALTIME_VAD_CREATE_RESPONSE", true),
+		"interrupt_response":  envBool("OPENAI_REALTIME_VAD_INTERRUPT_RESPONSE", true),
+	}
 }
 
 func instructions(partyALanguage string, partyBLanguage string) string {

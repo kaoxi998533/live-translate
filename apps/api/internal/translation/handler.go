@@ -30,12 +30,12 @@ func HandleCreateSession(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
 	var request CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, "请求内容格式不正确")
 		return
 	}
 
 	if request.PartyALanguage == "" || request.PartyBLanguage == "" || request.InputMode == "" {
-		writeError(w, http.StatusBadRequest, "partyALanguage, partyBLanguage, and inputMode are required")
+		writeError(w, http.StatusBadRequest, "请选择 A 和 B 说的语言")
 		return
 	}
 
@@ -45,7 +45,7 @@ func HandleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create translation session")
+		writeError(w, http.StatusInternalServerError, "无法创建翻译会话")
 		return
 	}
 
@@ -61,7 +61,7 @@ func HandleAddUsage(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
 	var request AddUsageRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, "请求内容格式不正确")
 		return
 	}
 

@@ -1,48 +1,75 @@
-# Architecture
+# 架构说明
 
-Live Translate Platform is split around product control boundaries.
+Live Translate Platform 按商业控制边界拆分：移动端负责交互，Go API 负责账号、权限、订阅、额度和 OpenAI Realtime client secret。
 
-## Mobile
+## 移动端
 
-The Expo React Native app owns customer interaction:
+Expo React Native 应用负责：
 
-- Authentication screens
-- Translation workspace
-- Usage dashboard
-- Billing entry points
+- 注册和登录
+- 两人同声翻译界面
+- 自动监听和按住说话
+- 用量与会员状态展示
+- 支付入口和本地测试支付状态
 
-The mobile app should stay thin: it displays entitlement state and captures
-audio, while the API remains responsible for authorization, session creation,
-and quota enforcement.
+移动端保持轻量：它展示服务端返回的权限状态并采集音频，但不决定用户是否有权翻译。
 
 ## API
 
-The Go API owns commercial enforcement:
+Go API 负责商业规则：
 
-- JWT verification
-- Subscription state
-- Trial grants
-- Weekly quota checks
-- Translation session lifecycle
-- Usage ledger writes
+- token 验证
+- bcrypt 密码认证
+- 订阅状态
+- 试用额度
+- 每周额度
+- 翻译会话生命周期
+- 用量流水
+- 支付订单和支付通知入口
+- OpenAI Realtime client secret 下发
 
-## Entitlement Flow
+## 数据库
 
-1. The client requests translation access.
-2. The API verifies the user.
-3. The API checks active subscription, active trial, and weekly quota.
-4. The API creates a translation session only if access is allowed.
-5. During translation, the API records usage events and updates the current quota period.
+`DATABASE_URL` 存在时，API 启动会连接 Postgres 并执行迁移。核心表包括：
 
-The client may display remaining usage, but the server is the source of truth.
+- `users`
+- `plans`
+- `subscriptions`
+- `payment_orders`
+- `trial_grants`
+- `quota_periods`
+- `translation_sessions`
+- `usage_events`
 
-## Realtime Translation Flow
+没有 `DATABASE_URL` 时，API 会回退到内存 store，方便快速开发和测试。
 
-1. The Android app creates a platform translation session through the Go API.
-2. The Go API checks trial, subscription, and weekly quota.
-3. The Android app requests an OpenAI Realtime client secret from the Go API.
-4. The Go API calls `POST /v1/realtime/client_secrets` with `OPENAI_API_KEY`.
-5. The Android app uses the ephemeral client secret to connect to OpenAI
-   Realtime over WebRTC.
-6. The app periodically reports usage to the Go API while the Realtime session
-   is active.
+## 权限流程
+
+1. 用户登录后请求翻译权限。
+2. API 读取用户、试用、订阅和本周用量。
+3. 只有试用有效或 Premium 有效且仍有剩余额度时，API 才创建翻译会话。
+4. 翻译过程中移动端周期性上报用量。
+5. API 写入用量流水并重新计算剩余额度。
+
+客户端可以展示剩余额度，但服务端是唯一可信来源。
+
+## 实时翻译流程
+
+1. Android 应用向 Go API 创建平台翻译会话。
+2. Go API 检查试用、订阅和每周额度。
+3. Android 应用向 Go API 请求 OpenAI Realtime client secret。
+4. Go API 使用服务端 `OPENAI_API_KEY` 调用 OpenAI Realtime。
+5. Android 应用使用短期 client secret 通过 WebRTC 连接 OpenAI Realtime。
+6. 应用保持自动监听，或在按住说话模式下手动提交音频 turn。
+
+## 支付流程
+
+当前本地已支持订单创建和开发环境标记已支付：
+
+1. 用户创建 Premium 订单。
+2. 服务端写入 `payment_orders`。
+3. 正式环境由微信支付、Stripe 或应用商店回调推进订单状态。
+4. 本地开发环境可调用开发接口把订单标记为已支付。
+5. 支付成功后创建/更新 `subscriptions`，用户变为 Premium。
+
+微信支付正式上线前必须接入真实签名、验签、证书轮换、退款和对账。

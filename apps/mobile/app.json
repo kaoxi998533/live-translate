@@ -10,7 +10,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.livetranslate.platform",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Live Translate Platform uses the microphone to transcribe and translate speech in real time."
+        "NSMicrophoneUsageDescription": "Live Translate Platform 需要使用麦克风来实时识别语音并翻译。"
       }
     },
     "android": {

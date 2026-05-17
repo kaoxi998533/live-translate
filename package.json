@@ -15,6 +15,7 @@
     "android:mobile": "npm --workspace apps/mobile run android",
     "typecheck:mobile": "npm --workspace apps/mobile run typecheck",
     "dev:api": "cd apps/api && go run ./cmd/api",
+    "dev:api:db": "cd apps/api && DATABASE_URL='postgres://live_translate:live_translate@localhost:5432/live_translate?sslmode=disable' go run ./cmd/api",
     "test:api": "cd apps/api && go test ./..."
   }
 }

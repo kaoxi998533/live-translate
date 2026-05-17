@@ -9,6 +9,14 @@ create type subscription_status as enum (
   'unpaid'
 );
 
+create type payment_provider as enum (
+  'stripe',
+  'wechat_pay',
+  'apple_iap',
+  'google_play',
+  'alipay'
+);
+
 create type usage_event_type as enum (
   'trial_grant',
   'translation_seconds',
@@ -19,9 +27,13 @@ create table users (
   id uuid primary key default gen_random_uuid(),
   auth_subject text not null unique,
   email text not null unique,
+  password_hash text not null,
   display_name text,
+  plan_id text not null default 'trial',
+  trial_ends_at timestamptz not null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint users_plan_id_check check (plan_id in ('trial', 'premium'))
 );
 
 create table plans (
@@ -29,6 +41,7 @@ create table plans (
   name text not null,
   weekly_limit_seconds integer not null check (weekly_limit_seconds > 0),
   stripe_price_id text unique,
+  wechat_price_code text unique,
   created_at timestamptz not null default now()
 );
 
@@ -36,14 +49,31 @@ create table subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   plan_id text not null references plans(id),
-  stripe_customer_id text not null,
-  stripe_subscription_id text not null unique,
+  provider payment_provider not null,
+  provider_customer_id text,
+  provider_subscription_id text not null,
   status subscription_status not null,
   current_period_start timestamptz,
   current_period_end timestamptz,
   cancel_at_period_end boolean not null default false,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (provider, provider_subscription_id)
+);
+
+create table payment_orders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  plan_id text not null references plans(id),
+  provider payment_provider not null,
+  provider_order_id text not null,
+  amount_minor integer not null check (amount_minor > 0),
+  currency text not null,
+  status text not null,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (provider, provider_order_id)
 );
 
 create table trial_grants (
@@ -73,8 +103,8 @@ create table quota_periods (
 create table translation_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
-  source_language text not null,
-  target_language text not null,
+  party_a_language text not null,
+  party_b_language text not null,
   input_mode text not null,
   status text not null default 'created',
   started_at timestamptz not null default now(),
@@ -98,5 +128,5 @@ create index translation_sessions_user_created_idx on translation_sessions(user_
 
 insert into plans (id, name, weekly_limit_seconds)
 values
-  ('trial', 'Trial', 900),
-  ('premium', 'Premium', 18000);
+  ('trial', '试用', 900),
+  ('premium', '高级会员', 18000);

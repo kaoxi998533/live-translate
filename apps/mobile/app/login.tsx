@@ -25,7 +25,7 @@ export default function LoginScreen() {
       auth.setSession(session);
       router.replace("/translate");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not continue");
+      setError(err instanceof Error ? err.message : "无法继续，请稍后再试");
     } finally {
       setLoading(false);
     }
@@ -35,11 +35,11 @@ export default function LoginScreen() {
     <SafeAreaView style={styles.screen}>
       <View style={styles.card}>
         <Text style={styles.title}>
-          {mode === "register" ? "Create account" : "Sign in"}
+          {mode === "register" ? "创建账号" : "登录"}
         </Text>
-        <Text style={styles.subtitle}>Android MVP uses the local Go API.</Text>
+        <Text style={styles.subtitle}>使用账号继续进入同声翻译。</Text>
 
-        <Text style={styles.label}>Email</Text>
+        <Text style={styles.label}>邮箱</Text>
         <TextInput
           autoCapitalize="none"
           keyboardType="email-address"
@@ -49,10 +49,10 @@ export default function LoginScreen() {
           value={email}
         />
 
-        <Text style={styles.label}>Password</Text>
+        <Text style={styles.label}>密码</Text>
         <TextInput
           onChangeText={setPassword}
-          placeholder="Password"
+          placeholder="至少 8 位密码"
           secureTextEntry
           style={styles.input}
           value={password}
@@ -66,7 +66,7 @@ export default function LoginScreen() {
           style={[styles.primaryButton, loading && styles.disabledButton]}
         >
           <Text style={styles.primaryButtonText}>
-            {loading ? "Working..." : "Continue"}
+            {loading ? "处理中..." : "继续"}
           </Text>
         </Pressable>
 
@@ -76,8 +76,8 @@ export default function LoginScreen() {
         >
           <Text style={styles.textButtonLabel}>
             {mode === "register"
-              ? "Already have an account? Sign in"
-              : "Need an account? Create one"}
+              ? "已有账号？去登录"
+              : "还没有账号？创建一个"}
           </Text>
         </Pressable>
       </View>
