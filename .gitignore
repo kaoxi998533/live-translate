@@ -11,3 +11,7 @@ coverage/
 *.log
 tmp/
 bin/
+*.keystore
+*.jks
+*.p12
+*.pem
